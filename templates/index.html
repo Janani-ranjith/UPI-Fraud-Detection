@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UPI Fraud Detection</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{--bg:#f4f6fa;--card:#fff;--text:#1d2433;--muted:#667085;--accent:#0f766e;--line:#e5e7eb;--ok:#16a34a;--warn:#d97706;--bad:#dc2626}
+  @media (prefers-color-scheme:dark){:root{--bg:#0f1420;--card:#182033;--text:#e7ebf3;--muted:#98a2b3;--line:#2a3550}}
+  *{box-sizing:border-box} body{margin:0;font-family:system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--text)}
+  header{padding:18px 28px;background:var(--accent);color:#fff} header h1{margin:0;font-size:1.3rem} header p{margin:4px 0 0;opacity:.85;font-size:.9rem}
+  main{max-width:1200px;margin:auto;padding:24px 28px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-bottom:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px} h2{margin:0 0 14px;font-size:1.05rem}
+  .form{display:grid;grid-template-columns:1fr 1fr;gap:12px} label{font-size:.8rem;color:var(--muted);display:block}
+  input,select{width:100%;padding:8px;margin-top:4px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
+  button{padding:10px 16px;border:0;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer;margin-top:14px;margin-right:8px}
+  button.alt{background:var(--muted)} .verdict{font-size:1.6rem;font-weight:700;margin:6px 0}
+  .bar{height:10px;background:var(--line);border-radius:6px;overflow:hidden;margin:4px 0 12px} .bar i{display:block;height:100%}
+  .row{display:flex;justify-content:space-between;font-size:.9rem} ul{padding-left:18px;margin:8px 0}
+  table{width:100%;border-collapse:collapse;font-size:.88rem} th,td{padding:8px;text-align:right;border-bottom:1px solid var(--line)} th:first-child,td:first-child{text-align:left}
+  th{color:var(--muted)} .muted{color:var(--muted);font-size:.85rem}
+</style>
+</head>
+<body>
+<header><h1>UPI Fraud Detection using Machine Learning &amp; Deep Learning</h1>
+<p>Enter transaction details and four models (3 ML + 1 Deep Neural Network) estimate the fraud risk.</p></header>
+<main>
+<div class="grid">
+  <div class="card">
+    <h2>Check a Transaction</h2>
+    <div class="form">
+      <label>Amount (₹)<input id="amount" type="number" value="1500"></label>
+      <label>Avg amount, last 30 days (₹)<input id="avg_amount_30d" type="number" value="1200"></label>
+      <label>Hour of day (0-23)<input id="hour" type="number" min="0" max="23" value="14"></label>
+      <label>Day of week (0=Mon)<input id="day_of_week" type="number" min="0" max="6" value="2"></label>
+      <label>Transaction type<select id="txn_type"><option>P2P</option><option>Merchant</option><option>Bill Payment</option><option>Recharge</option></select></label>
+      <label>Device<select id="device"><option>Android</option><option>iOS</option><option>Web</option></select></label>
+      <label>New payee?<select id="is_new_payee"><option value="0">No</option><option value="1">Yes</option></select></label>
+      <label>Location mismatch?<select id="location_mismatch"><option value="0">No</option><option value="1">Yes</option></select></label>
+      <label>Transactions in last 24h<input id="txns_last_24h" type="number" value="2"></label>
+      <label>Failed attempts<input id="failed_attempts" type="number" value="0"></label>
+      <label>Account age (days)<input id="account_age_days" type="number" value="400"></label>
+    </div>
+    <button onclick="check()">Check Fraud Risk</button>
+    <button class="alt" onclick="fill('safe')">Safe example</button>
+    <button class="alt" onclick="fill('fraud')">Fraud example</button>
+  </div>
+  <div class="card" id="result"><h2>Result</h2><p class="muted">Submit a transaction to see the analysis.</p></div>
+</div>
+<div class="grid">
+  <div class="card"><h2>Model Comparison (test data)</h2><canvas id="cmp"></canvas></div>
+  <div class="card"><h2>Top Fraud Indicators</h2><canvas id="imp"></canvas><p class="muted" id="ds"></p></div>
+</div>
+<div class="card"><h2>Detailed Metrics</h2><table id="tbl"></table></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const ids = ["amount","avg_amount_30d","hour","day_of_week","txn_type","device","is_new_payee","location_mismatch","txns_last_24h","failed_attempts","account_age_days"];
+const examples = {
+  safe:  {amount:850,avg_amount_30d:900,hour:13,day_of_week:2,txn_type:"Merchant",device:"Android",is_new_payee:0,location_mismatch:0,txns_last_24h:2,failed_attempts:0,account_age_days:900},
+  fraud: {amount:48000,avg_amount_30d:1500,hour:2,day_of_week:6,txn_type:"P2P",device:"Web",is_new_payee:1,location_mismatch:1,txns_last_24h:9,failed_attempts:3,account_age_days:12}
+};
+function fill(k){ ids.forEach(i => $(i).value = examples[k][i]); }
+
+async function check(){
+  const body = {}; ids.forEach(i => body[i] = $(i).value);
+  const res = await fetch("/api/predict", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+  const d = await res.json();
+  if(!res.ok){ $("result").innerHTML = "<h2>Result</h2><p>"+d.error+"</p>"; return; }
+  const col = d.risk >= 70 ? "var(--bad)" : d.risk >= 40 ? "var(--warn)" : "var(--ok)";
+  $("result").innerHTML = `<h2>Result</h2>
+    <div class="verdict" style="color:${col}">${d.verdict}</div>
+    <div class="row"><span>Overall fraud risk (average of 4 models)</span><b>${d.risk}%</b></div>
+    <div class="bar"><i style="width:${d.risk}%;background:${col}"></i></div>
+    ${Object.entries(d.models).map(([n,v]) => `<div class="row"><span>${n}</span><b>${v}%</b></div><div class="bar"><i style="width:${v}%;background:var(--accent)"></i></div>`).join("")}
+    <b>Risk factors</b><ul>${d.reasons.length ? d.reasons.map(r => "<li>"+r+"</li>").join("") : "<li>No major risk factors found</li>"}</ul>`;
+}
+
+async function loadMetrics(){
+  const m = await (await fetch("/api/metrics")).json(), names = Object.keys(m.models);
+  const keys = ["accuracy","precision","recall","f1","roc_auc"], colors = ["#0f766e","#0891b2","#f59e0b","#8b5cf6","#ef4444"];
+  new Chart($("cmp"), {type:"bar", data:{labels:names, datasets:keys.map((k,i) => ({label:k.toUpperCase().replace("_"," "), data:names.map(n => m.models[n][k]), backgroundColor:colors[i]}))},
+    options:{scales:{y:{beginAtZero:true,max:1}}}});
+  new Chart($("imp"), {type:"bar", data:{labels:m.importances.map(x => x.feature), datasets:[{label:"Importance (Random Forest)", data:m.importances.map(x => x.value), backgroundColor:"#0f766e"}]},
+    options:{indexAxis:"y"}});
+  $("ds").textContent = `Dataset: ${m.dataset.rows.toLocaleString()} transactions, ${m.dataset.fraud_rate}% fraud.`;
+  $("tbl").innerHTML = "<tr><th>Model</th><th>Accuracy</th><th>Precision</th><th>Recall</th><th>F1</th><th>ROC-AUC</th><th>TN / FP / FN / TP</th></tr>" +
+    names.map(n => { const x = m.models[n], c = x.confusion;
+      return `<tr><td>${n}</td><td>${x.accuracy}</td><td>${x.precision}</td><td>${x.recall}</td><td>${x.f1}</td><td>${x.roc_auc}</td><td>${c[0][0]} / ${c[0][1]} / ${c[1][0]} / ${c[1][1]}</td></tr>`; }).join("");
+}
+loadMetrics();
+</script>
+</body>
+</html>
